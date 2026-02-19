@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Variables Group Table Demo</title>
+  <style>
+/* =========================
+   Polished Dashboard CSS (Fixes 1~4)
+   + Embed DATA CART + SELECT SAMPLE into #group-title (3 columns)
+   Columns: [Counts] [Data Cart Button] [Select Samples Button]
+   ========================= */
+
+/* ====== Theme tokens ====== */
+:root{
+  --navy: #003366;
+  --navy-2: #00284f;
+  --accent: #00a2e8;
+  --accent-2:#007bff;
+
+  --bg: #f6f8fb;
+  --card: #ffffff;
+  --text: #0f172a;
+  --muted:#64748b;
+  --border:#e6eaf0;
+
+  --shadow: 0 10px 30px rgba(2, 6, 23, 0.08);
+  --shadow2: 0 6px 18px rgba(2, 6, 23, 0.10);
+
+  --radius: 14px;
+
+  /* layout sizes */
+  --sidebar-w: 220px;
+  --gap: 18px;
+
+  /* top bar */
+  --topbar-h: 78px;
+
+  /* optional widths */
+  --counts-w: 200px;
+  --sb-w: var(--sidebar-w, 270px);
+  --sb-pad: 18px;
+  --sb-radius: 18px;
+  --sb-text: rgba(255,255,255,0.92);
+  --sb-muted: rgba(255,255,255,0.70);
+  --sb-line: rgba(255,255,255,0.10);
+  --sb-glow: rgba(0,162,232,0.35);
+}
+
+/* ====== Global layout: NO page scroll, only table scroll ====== */
+html, body{
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Arial, sans-serif;
+}
+
+body{
+  display: flex;
+}
+
+/* Sidebar container */
+.sidebar{
+  width: var(--sb-w);
+  height: 100vh;
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: 20px var(--sb-pad);
+
+  /* richer background */
+  background:
+    radial-gradient(900px 520px at 10% 0%, rgba(0,162,232,0.22), transparent 55%),
+    radial-gradient(650px 420px at 70% 25%, rgba(255,255,255,0.08), transparent 60%),
+    linear-gradient(180deg, #05396b 0%, #022345 65%, #011a35 100%);
+
+  color: #fff;
+  box-shadow: 0 18px 40px rgba(2,6,23,0.22);
+  border-right: 1px solid rgba(255,255,255,0.08);
+  position: sticky;
+  top: 0;
+}
+
+/* Optional: add a subtle inner highlight */
+.sidebar::before{
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), transparent 45%);
+  opacity: 0.55;
+}
+
+/* Sidebar title */
+.sidebar h2{
+  margin: 4px 0 14px 0;
+  padding: 10px 12px;
+
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+
+  color: var(--sb-text);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 14px;
+}
+
+/* List layout */
+.sidebar ul{
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Item base */
+.sidebar li{
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  padding: 10px 12px;
+  margin: 0 0 8px 0;
+
+  border-radius: 14px;
+  color: var(--sb-text);
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: 0.2px;
+
+  cursor: pointer;
+  user-select: none;
+
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+
+  transition:
+    transform 0.14s ease,
+    background 0.14s ease,
+    border-color 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+/* Left accent bar */
+.sidebar li::before{
+  content: "";
+  width: 6px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.18);
+  flex: 0 0 auto;
+  transition: background 0.14s ease, box-shadow 0.14s ease;
+}
+
+/* Hover */
+.sidebar li:hover{
+  transform: translateX(2px);
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.12);
+  box-shadow: 0 10px 18px rgba(2,6,23,0.18);
+}
+
+.sidebar li:hover::before{
+  background: rgba(0,162,232,0.55);
+  box-shadow: 0 0 0 4px rgba(0,162,232,0.10);
+}
+
+/* Active state (JS add .active) */
+.sidebar li.active{
+  background: rgba(0,162,232,0.14);
+  border-color: rgba(0,162,232,0.28);
+  box-shadow: 0 16px 28px rgba(0,162,232,0.10);
+}
+
+.sidebar li.active::before{
+  background: rgba(0,162,232,0.95);
+  box-shadow: 0 0 0 4px rgba(0,162,232,0.14);
+}
+
+/* Divider line between sections (optional: add <hr class="sb-divider">) */
+.sidebar .sb-divider{
+  border: none;
+  height: 1px;
+  background: var(--sb-line);
+  margin: 14px 6px;
+  opacity: 0.9;
+}
+
+/* Slim scrollbar (WebKit) */
+.sidebar::-webkit-scrollbar{
+  width: 10px;
+}
+.sidebar::-webkit-scrollbar-thumb{
+  background: rgba(255,255,255,0.12);
+  border-radius: 999px;
+  border: 2px solid rgba(1,26,53,0.6);
+}
+.sidebar::-webkit-scrollbar-thumb:hover{
+  background: rgba(255,255,255,0.18);
+}
+
+/* Firefox scrollbar */
+.sidebar{
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.14) rgba(0,0,0,0);
+}
+
+/* Ensure sidebar positioning isn't broken by ::before absolute */
+.sidebar{
+  position: sticky;
+}
+.sidebar{
+  position: sticky;
+}
+.sidebar{
+  position: sticky;
+}
+
+/* ====== Main content: fixed viewport; table scrolls inside ====== */
+.main-content{
+  flex: 1;
+  height: 100vh;
+  box-sizing: border-box;
+  padding: calc(var(--topbar-h) + 14px) 24px 18px 24px;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ====== Top title bar fixed (NOW contains 3 columns) ====== */
+#group-title{
+  position: fixed;
+  top: 14px;
+  left: calc(var(--sidebar-w) + var(--gap));
+  right: 24px;
+  height: 50px;
+  z-index: 950;
+
+  /* ✅ Make it a 3-column bar */
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+
+  background: rgba(255,255,255,0.88);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(230,234,240,0.85);
+  box-shadow: 0 8px 24px rgba(2,6,23,0.06);
+  border-radius: 16px;
+
+  padding: 10px 14px;
+  margin: 0;
+
+  /* keep original title text style */
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+
+  /* ✅ reserve left space for the group title text itself */
+  padding-left: 16px;
+}
+
+/* remove any old tip line */
+#group-title::after{
+  content: "";
+  display: none;
+}
+
+/* ✅ Put the "group title text" back on the left via pseudo-element trick?
+   NO: group title text is already inside #group-title as text node.
+   We just need the text to stay left and controls on right.
+*/
+#group-title{
+  justify-content: space-between; /* title text left, controls right */
+}
+
+/* ====== Action bar embedded inside #group-title ====== */
+.action-bar{
+  position: static;             /* ✅ no longer floating */
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: auto;
+}
+
+/* ====== Data cart becomes COUNT PANEL (left block) ======
+   Requirement: "顯示有幾個sample和variable" as one block.
+   We'll use #data-cart to show counts only + keep VIEW CART as the middle block button.
+*/
+#data-cart{
+  display: flex;
+  align-items: center;
+  gap: 14px;
+
+  width: auto;
+  background: rgba(245,248,252,0.9);
+  border: 1px solid rgba(15,23,42,0.10);
+  border-radius: 12px;
+  box-shadow: none;
+  padding: 8px 12px;
+  margin-top: 0;
+}
+
+/* Hide DATA CART heading to keep it compact */
+#data-cart h3{
+  display: none;
+}
+
+/* Make the two p lines look like KPIs */
+#data-cart p{
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: 10px;
+  row-gap: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  min-width: var(--counts-w);
+}
+
+/* Bigger numbers */
+#variable-count, #sample-count{
+  color: var(--text);
+  font-weight: 900;
+  font-size: 18px;
+}
+
+/* ====== VIEW CART button becomes the MIDDLE block ====== */
+#data-cart button{
+  width: auto;
+  background: linear-gradient(180deg, var(--accent) 0%, #0092d3 100%);
+  color: #fff;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 900;
+  outline: none;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+  box-shadow: 0 10px 20px rgba(0,162,232,0.18);
+}
+
+#data-cart button:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 14px 26px rgba(0,162,232,0.26);
+  opacity: 0.96;
+}
+
+/* ====== Select Samples is the RIGHT block ====== */
+.button-row{
+  display: flex;
+}
+
+#sample{
+  background: linear-gradient(180deg, #0b5aa8 0%, #094a8a 100%);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.10);
+  padding: 12px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 900;
+  outline: none;
+  box-shadow: 0 10px 22px rgba(2,6,23,0.10);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+  line-height: 1.05;
+}
+
+#sample:hover{
+  transform: translateY(-1px);
+  opacity: 0.95;
+  box-shadow: 0 14px 28px rgba(2,6,23,0.14);
+}
+
+/* ====== Table container: the ONLY scroll area ====== */
+.table-container{
+  height: calc(100vh - (var(--topbar-h) + 14px) - 24px);
+  margin-top: 10px;
+
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 14px;
+
+  overflow: auto;
+}
+
+/* ====== Table styling ====== */
+table{
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 1200px;
+  margin-top: 0;
+  border: none;
+}
+
+th, td{
+  border-bottom: 1px solid var(--border);
+  padding: 10px 10px;
+  font-size: 13px;
+  text-align: center;
+}
+
+thead th{
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+  z-index: 3;
+  color: #0b1f3a;
+  font-weight: 900;
+  letter-spacing: 0.2px;
+}
+
+tbody tr:nth-child(odd){
+  background: #fcfdff;
+}
+
+tr:hover{
+  background: #f3f8ff;
+}
+
+th.sticky{
+  position: sticky;
+  left: 0;
+  background: #f8fafc;
+  z-index: 4;
+  box-shadow: 8px 0 14px rgba(2,6,23,0.05);
+}
+
+.variable-name{
+  color: var(--navy);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+a{
+  color: var(--navy);
+  text-decoration: underline;
+}
+a:hover{ opacity: 0.85; }
+
+/* ====== Buttons: keep your existing cart buttons but match style ====== */
+.cart-action-row button{
+  background: #eef5ff;
+  color: var(--navy);
+  border: 1px solid #dbe7ff;
+  padding: 12px 16px;
+  font-size: 16px;
+  font-weight: 900;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+
+.cart-action-row button:last-child{
+  background: linear-gradient(180deg, var(--accent-2) 0%, #1f66d0 100%);
+  color: #fff;
+  border: none;
+}
+
+.cart-action-row button:hover{
+  transform: translateY(-1px);
+  opacity: 0.92;
+}
+
+#sample-confirm, #sample-back, #goback{
+  background-color: var(--navy);
+  color: white;
+  border: none;
+  padding: 14px 18px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 900;
+  outline: none;
+  transition: transform 0.12s ease, opacity 0.12s ease, background 0.12s ease;
+}
+
+#sample-confirm:hover, #sample-back:hover, #goback:hover{
+  background-color: var(--accent-2);
+  transform: translateY(-1px);
+  opacity: 0.95;
+}
+/* =========================
+   Sample Selection View – UI polish + vertical scrolling
+   Drop this at the END of your CSS (override rules)
+   ========================= */
+
+/* Sample view should NOT be overflow hidden (allow internal scroll container) */
+#sample-view{
+  display: none;           /* you already toggle via JS; keep as-is */
+  height: 100vh;
+  overflow: hidden;        /* page doesn't scroll */
+  box-sizing: border-box;
+  padding: calc(var(--topbar-h) + 14px) 24px 18px 24px; /* align with main layout */
+  background: var(--bg);
+}
+
+/* Make the years table area scrollable (only inside this view) */
+#sample-view #years-table{
+  width: 100%;
+  max-width: 720px;
+  margin-top: 10px;
+
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  overflow: hidden;        /* keep rounded corners for sticky header */
+}
+
+/* Wrap scrolling to table body by turning tbody into a block scroll area */
+#sample-view #years-table thead,
+#sample-view #years-table tbody tr{
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+
+#sample-view #years-table tbody{
+  display: block;
+  max-height: calc(100vh - (var(--topbar-h) + 14px) - 18px - 90px); 
+  /* topbar + padding + bottom buttons space */
+  overflow-y: auto;        /* ✅ vertical scrolling */
+  overflow-x: hidden;
+}
+
+/* Sticky header */
+#sample-view #years-table thead th{
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #f8fafc;
+  color: #0b1f3a;
+  font-weight: 900;
+  letter-spacing: 0.2px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Cell styling */
+#sample-view #years-table th,
+#sample-view #years-table td{
+  padding: 12px 14px;
+  font-size: 14px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+/* Column widths: Select / Sample */
+#sample-view #years-table th:first-child,
+#sample-view #years-table td:first-child{
+  width: 110px;
+  text-align: center;
+}
+
+#sample-view #years-table th:last-child,
+#sample-view #years-table td:last-child{
+  width: auto;
+}
+
+/* Zebra rows + hover */
+#sample-view #years-table tbody tr:nth-child(odd){
+  background: #fcfdff;
+}
+
+#sample-view #years-table tbody tr:hover{
+  background: #f3f8ff;
+}
+
+/* Checkbox better alignment */
+#sample-view #years-table input[type="checkbox"]{
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-2);
+  cursor: pointer;
+}
+/* ✅ Allow scrolling past the sticky Confirm area */
+#sample-view #years-table tbody{
+  padding-bottom: 120px;   /* 讓最後幾列不被 Confirm/漸層蓋住 */
+  box-sizing: border-box;
+}
+
+/* === FIX: bottom gradient overlay always visible === */
+
+#sample-view > div[style*="text-align: right"]{
+  z-index: 3;
+  position: sticky;
+  bottom: 16px;
+  height: auto;           /* 保險 */
+  pointer-events: auto;   /* 按鈕要能點 */
+}
+
+
+/* 在 sample-view 底部加一層「固定」的漸層遮罩 */
+#sample-view{
+  position: relative; /* 讓 pseudo-element 有定位基準 */
+}
+
+
+/* 確保 Confirm 那一行在漸層上層 */
+#sample-view > div[style*="text-align: right"]{
+  position: sticky;
+  bottom: 16px;
+  z-index: 3;
+}
+
+
+/* Optional: make the sample title look consistent (uses same #group-title already) */
+/* If you want sample view title to be slightly different, uncomment:
+#sample-view #group-title{ font-size: 20px; }
+*/
+
+#cart-view{
+  overflow: hidden;
+}
+
+
+
+  </style>
+</head>
+<body>
+
+<div class="sidebar">
+  <h2>Variable Groups</h2>
+  <ul id="group-list">
+    
+  </ul>
+</div>
+
+<div class="main-content" id ="main-view">
+  <h1 id="group-title">Select a Variable Group</h1>
+  <div class="action-bar">
+    <div id="data-cart">
+      <h3>DATA CART</h3>
+      <p><span id="variable-count">0</span> VARIABLES</p>
+      <p><span id="sample-count">0</span> SAMPLES</p>
+      <button onclick="showCartView()">VIEW CART</button>
+    </div>
+
+    <div class="button-row">
+      <button id="sample" onclick="selectSample()">Select<br>Samples</button>
+    </div>
+  </div>
+
+  <div class="table-container">
+    <table id="variables-table">
+      <thead id="table-head"></thead>
+      <tbody id="table-body"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- 購物車畫面 -->
+<div class= "main-content" id="cart-view" style="display: none;">
+  <h1 id="group-title">Data Cart</h1>
+
+  <div class="cart-action-row" style="margin-bottom: 16px; display: flex; gap: 16px;">
+    <button id="add-variable-btn" onclick="goBack()">ADD MORE VARIABLES</button>
+    <button id="add-sample-btn" onclick="selectSample()">ADD MORE SAMPLES</button>
+    <button id="extract-btn" style="display: none;">CREATE DATA EXTRACT</button>
+  </div>
+
+  <table id="cart-variables-table">
+    <thead id="cart-table-head"></thead>
+    <tbody id="cart-table-body"></tbody>
+  </table>
+
+  <div class="bottom-row" style="text-align: right; margin-top: 10px;">
+    <button id="goback" onclick="goBack()">Back</button>
+  </div>
+</div>
+
+<!-- Sample Selection Modal -->
+<div class="main-content" id="sample-view" style="display: none;">
+  <h1 id="group-title">Select Sample Years</h1>
+  <table id="years-table">
+    <thead>
+      <tr>
+        <th>Select</th>
+        <th>Sample</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- 動態插入年份勾選列 -->
+    </tbody>
+  </table>
+  <div style="text-align: right; margin-top: 20px;">
+    <button id="sample-confirm" onclick="confirmSample()">Confirm</button>
+  </div>
+</div>
+
+<script src = "script.js"></script>
+
+
+</body>
+</html>
