@@ -1,17 +1,14 @@
 let jsonData = []; // 全域變數用來存放讀取的 JSON 資料
 let selectedVariables = [];
-let currentGroupName = "";
-let selectedSamples = []; // 新增：已選年份
-let previousView = "main-view"; // 預設上一頁是 main-view
+let currentGroupName = "";         // ✅ 空字串代表「Home / 初始狀態」
+let selectedSamples = [];          // 已選年份
+let previousView = "main-view";    // 預設上一頁是 main-view
 
-// 年份標題
-// 這裡不要寫死，用匯入的 JSON 裡的 YEAR 來生
-let sampleNames = [];   // 例如 ["CII2002", "CIII2004", "CV2008", ...]
-let responsesData = [];   // 放 merged_survey_responses.json（第20列以後，每人一筆）
+let sampleNames = [];              // 例如 ["CII2002", "CIII2004", ...]
+let topicMap = {};                 // qid -> topic
+let searchQuery = "";              // ✅ 搜尋字串（新增）
 
-
-// 模擬變數資料（含該變數在不同年份的狀態）
-// 題組清單（你附圖那幾個）
+// 題組清單（左側 sidebar）
 const variableGroups = [
   { id: "A 基本資料", label: "A 基本資料" },
   { id: "B 教育", label: "B 教育" },
@@ -25,11 +22,10 @@ const variableGroups = [
   { id: "K 家庭決策與支出", label: "K 家庭決策與支出" },
   { id: "L 老年", label: "L 老年" },
   { id: "S 態度量表", label: "S 態度量表" },
-  // 保留一個給購物車用的
-  { id: "Selected Questions", label: "Selected Questions" }
+  { id: "Selected Questions", label: "Selected Questions" } // cart
 ];
 
-// 這是之後 loadGroup 要用的容器，先準備好 key
+// 資料容器
 const data = {
   "A 基本資料": [],
   "B 教育": [],
@@ -46,41 +42,50 @@ const data = {
   "Selected Questions": []
 };
 
-const groupNameMap = {
-  "A": "A 基本資料",
-  "B": "B 教育",
-  "C": "C 工作",
-  "D": "D 交往、婚姻與配偶資訊",
-  "E": "E 退休",
-  "F": "F 居住",
-  "G": "G 子女",
-  "H": "H 父母",
-  "J": "J 兄弟姊妹",
-  "K": "K 家庭決策與支出",
-  "L": "L 老年",
-  "S": "S 態度量表"
-};
+// ========== ✅ CSV 解析（簡易版） ==========
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+  if (lines.length === 0) return [];
 
+  const headers = lines[0].split(",").map(h => h.trim());
+  const rows = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(",");
+    const obj = {};
+    headers.forEach((h, idx) => obj[h] = (cols[idx] ?? "").trim());
+    rows.push(obj);
+  }
+  return rows;
+}
+
+function buildTopicMapFromCsvRows(rows) {
+  const map = {};
+  rows.forEach(r => {
+    const qid = (r["question_column"] || "").trim();
+    const topic = (r["topic"] || "").trim();
+    if (!qid || !topic) return;
+    map[qid] = topic;
+  });
+  return map;
+}
+
+// ========== 工具：從目前 data 裡找題目（購物車用） ==========
 function findQuestionById(qid) {
-  // 不要找 Selected Questions 自己，避免迴圈
-  const allGroupLabels = Object.values(groupNameMap);
-  for (const label of allGroupLabels) {
-    const list = data[label] || [];
+  for (const groupLabel of Object.keys(data)) {
+    if (groupLabel === "Selected Questions") continue;
+    const list = data[groupLabel] || [];
     const found = list.find(item => item.number === qid);
-    if (found) {
-      return found;
-    }
+    if (found) return found;
   }
   return null;
 }
-
 
 function buildSelectedQuestionsForCart() {
   const selectedList = [];
   selectedVariables.forEach(qid => {
     const q = findQuestionById(qid);
     if (q) {
-      // 複製一份，避免之後改到原本的
       selectedList.push({
         number: q.number,
         name: q.name,
@@ -92,22 +97,21 @@ function buildSelectedQuestionsForCart() {
   data["Selected Questions"] = selectedList;
 }
 
-
+// ========== ✅ 用 topicMap 來分群 ==========
 function buildGroupsFromJson(jsonData) {
   if (!jsonData || jsonData.length === 0) return;
 
-  // 進來時 sampleNames 應該已經是 ["CII2002", "CIII2004", ...]
-  // 先清空各組
-  Object.values(groupNameMap).forEach(groupLabel => {
-    data[groupLabel] = [];
+  Object.keys(data).forEach(groupLabel => {
+    if (groupLabel !== "Selected Questions") data[groupLabel] = [];
   });
 
-  // 全部題號（欄位名）
   const allKeys = Object.keys(jsonData[0]);
   const questionKeys = allKeys.filter(k => k !== "YEAR" && k !== "ID");
 
   questionKeys.forEach(qid => {
-    // 找這題在不同 sample 裡「第一個有字的版本」
+    const groupLabel = topicMap[qid];
+    if (!groupLabel || !data[groupLabel]) return;
+
     let rawText = "";
     for (let i = 0; i < jsonData.length; i++) {
       const val = jsonData[i][qid];
@@ -120,35 +124,24 @@ function buildGroupsFromJson(jsonData) {
 
     const parts = rawText.split("｜");
     const code = parts[0] ? parts[0].trim() : "";
-    const questionText = parts[1] ? parts[1].trim() : "";
+    const questionText = parts[1] ? parts[1].trim() : rawText;
 
-    if (!code) return;
-
-    const firstLetter = code[0].toUpperCase();
-    const groupLabel = groupNameMap[firstLetter];
-    if (!groupLabel) {
-      // 不在我們要的 A/B/C... 就先略過
-      return;
-    }
-
-    // 這裡開始做「這題在哪些 sample 出現」
-    // jsonData[i] 的順序就跟 sampleNames[i] 對得上
     const presence = sampleNames.map((_, idx) => {
       const row = jsonData[idx];
       const v = row[qid];
-      return (v && v.trim() !== "") ? "✓" : "";   // 有值就打勾，沒有就空白
+      return (v && v.trim() !== "") ? "✓" : "";
     });
 
     data[groupLabel].push({
-      number: qid,         // 題目編號
-      name: code,          // 題目代碼
-      desc: questionText,  // 題目文字
-      values: presence     // ← 這就是表格後面要顯示的一整排勾勾
+      number: qid,
+      name: code,
+      desc: questionText,
+      values: presence
     });
   });
 
-  // 排序一下題號，比較好看
-  Object.values(groupNameMap).forEach(groupLabel => {
+  Object.keys(data).forEach(groupLabel => {
+    if (groupLabel === "Selected Questions") return;
     data[groupLabel].sort((a, b) => {
       const na = Number(a.number);
       const nb = Number(b.number);
@@ -158,26 +151,55 @@ function buildGroupsFromJson(jsonData) {
   });
 }
 
+// ========== ✅ 搜尋：Home = 全部分類；分類頁 = 該分類 ==========
+function getRowsForCurrentSearchScope(groupName) {
+  const isHome = (!groupName || groupName.trim() === "");
+  if (isHome) {
+    const all = [];
+    Object.keys(data).forEach(g => {
+      if (g === "Selected Questions") return;
+      (data[g] || []).forEach(item => {
+        all.push({ ...item, __group: g });
+      });
+    });
+    return all;
+  }
+  return (data[groupName] || []).map(item => ({ ...item, __group: groupName }));
+}
 
-// 動態產生左邊的題組清單
+function matchRowByQuery(row, q) {
+  if (!q) return true;
+  const needle = q.toLowerCase();
+  const hay = [row.number, row.name, row.desc, row.__group].join(" ").toLowerCase();
+  return hay.includes(needle);
+}
+
+// ========== Sidebar ==========
 const groupListEl = document.getElementById("group-list");
+
 variableGroups.forEach(g => {
   const li = document.createElement("li");
   li.textContent = g.label;
+
   li.onclick = () => {
-    currentGroupName = g.id;       // 記錄目前選到哪一組
-    loadGroup(g.id);               // 叫你原本的畫表函式
-    // 切回主畫面（如果你目前在 cart 或 sample）
+    // active UI
+    document.querySelectorAll("#group-list li").forEach(x => x.classList.remove("active"));
+    li.classList.add("active");
+
+    // 切換到該分類
+    currentGroupName = g.id;
+    loadGroup(g.id, g.id === "Selected Questions");
+
+    // 切回主畫面
     document.getElementById('cart-view').style.display = 'none';
     document.getElementById('sample-view').style.display = 'none';
     document.getElementById('main-view').style.display = 'block';
   };
+
   groupListEl.appendChild(li);
 });
 
-
-
-// 當點選群組時，載入對應的變數資料
+// ========== 勾選題目（加入購物車） ==========
 function updateCart(questionId, isChecked) {
   if (isChecked) {
     if (!selectedVariables.includes(questionId)) {
@@ -187,34 +209,31 @@ function updateCart(questionId, isChecked) {
     selectedVariables = selectedVariables.filter(v => v !== questionId);
   }
   document.getElementById("variable-count").textContent = selectedVariables.length;
-  updateExtractButton();  // 勾勾變化時順便更新一下按鈕顯示
+  updateExtractButton();
 }
 
-
+// ========== View 切換 ==========
 function showCartView() {
-  // 先用現在勾到的題號，做出購物車的資料
   buildSelectedQuestionsForCart();
 
   document.getElementById('main-view').style.display = 'none';
   document.getElementById('sample-view').style.display = 'none';
   document.getElementById('cart-view').style.display = 'block';
 
-  // 這裡才畫表
   loadGroup("Selected Questions", true);
   updateExtractButton();
 }
-
 
 function goBack() {
   document.getElementById('cart-view').style.display = 'none';
   document.getElementById('sample-view').style.display = 'none';
   document.getElementById('main-view').style.display = 'block';
-  loadGroup(currentGroupName); // 重新載入目前群組
-  console.log("返回主畫面，載入群組:", currentGroupName);
+
+  // 回到「當前分類」；若沒選分類則留在 home（可用搜尋全題庫）
+  loadGroup(currentGroupName, false);
 }
 
 function selectSample() {
-  // 記錄目前顯示的 view
   if (document.getElementById('main-view').style.display !== 'none') {
     previousView = "main-view";
   } else if (document.getElementById('cart-view').style.display !== 'none') {
@@ -225,11 +244,9 @@ function selectSample() {
   document.getElementById('sample-view').style.display = 'block';
   document.getElementById('cart-view').style.display = 'none';
 
-  // 動態產生 sample 表格
   const tbody = document.querySelector('#years-table tbody');
   tbody.innerHTML = '';
 
-  // sampleNames 是我們讀 JSON 時抓到的 YEAR 陣列
   sampleNames.forEach(sample => {
     const row = document.createElement('tr');
 
@@ -263,12 +280,15 @@ function confirmSample() {
   document.getElementById(previousView).style.display = 'block';
   document.getElementById('sample-count').textContent = selectedSamples.length;
   updateExtractButton();
-}
 
+  // 回來後如果是 main-view，就重畫（讓 sample 勾勾欄仍保留）
+  if (previousView === "main-view") loadGroup(currentGroupName, false);
+  if (previousView === "cart-view") loadGroup("Selected Questions", true);
+}
 
 function updateExtractButton() {
   const extractBtn = document.getElementById('extract-btn');
-  // 只有當 sample 和 variable 都有選時才顯示
+  if (!extractBtn) return;
   if (selectedVariables.length > 0 && selectedSamples.length > 0) {
     extractBtn.style.display = 'inline-block';
   } else {
@@ -276,25 +296,28 @@ function updateExtractButton() {
   }
 }
 
-
-function getExportHeaderForQuestion(qid) {
-  const q = findQuestionById(qid);
-  if (!q) return qid;  // 找不到就用編號
-  // 你可以改成 `${qid}_${q.name}` 或 `${qid}_${q.desc}`
-  // 我先給你一個比較好看的：編號+代碼
-  return `${qid}_${q.name}`;
+// ========== 標題更新（修掉重複 id） ==========
+function setMainTitle(text) {
+  document.getElementById("group-title-main").textContent = text;
+}
+function setCartTitle(text) {
+  document.getElementById("group-title-cart").textContent = text;
+}
+function setSampleTitle(text) {
+  document.getElementById("group-title-sample").textContent = text;
 }
 
-
-// 載入群組
+// ========== 表格 ==========
 function loadGroup(groupName, isCartView = false) {
   let tableHead, tableBody;
-  document.getElementById("group-title").textContent = groupName;
 
   if (isCartView) {
+    setCartTitle("Data Cart");
     tableHead = document.querySelector("#cart-table-head");
     tableBody = document.querySelector("#cart-table-body");
   } else {
+    // Home (groupName==""), 或分類
+    setMainTitle(groupName && groupName.trim() ? groupName : "Select a Variable Group (Home: search all)");
     tableHead = document.getElementById("table-head");
     tableBody = document.getElementById("table-body");
   }
@@ -313,16 +336,41 @@ function loadGroup(groupName, isCartView = false) {
   });
   tableHead.appendChild(headRow);
 
+  // rows: cart 固定 Selected Questions；main 則依 group/home
+  let rows = [];
+  if (isCartView) {
+    rows = data["Selected Questions"] || [];
+  } else {
+    rows = getRowsForCurrentSearchScope(groupName);
+    // ✅ Home 且沒輸入搜尋：不要塞滿整張表（避免太重）
+    if ((!groupName || groupName.trim() === "") && (!searchQuery || !searchQuery.trim())) {
+      // 顯示提示列
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 5 + sampleNames.length;
+      td.style.textAlign = "left";
+      td.style.padding = "14px";
+      td.style.color = "#64748b";
+      td.style.fontWeight = "700";
+      td.textContent = "Type in the search box to search across ALL groups. (選分類後則只搜尋該分類)";
+      tr.appendChild(td);
+      tableBody.appendChild(tr);
+      return;
+    }
+  }
+
+  // 套用搜尋
+  const q = (searchQuery || "").trim();
+  if (q) rows = rows.filter(r => matchRowByQuery(r, q));
+
   // 實際資料
-  const rows = data[groupName] || [];
-  rows.forEach((variable, rowIndex) => {
+  rows.forEach(variable => {
     const row = document.createElement("tr");
 
     // Select
     const selectCell = document.createElement("td");
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
-    // 用題號當 key
     checkbox.checked = selectedVariables.includes(variable.number);
     checkbox.onchange = () => updateCart(variable.number, checkbox.checked);
     selectCell.appendChild(checkbox);
@@ -340,7 +388,7 @@ function loadGroup(groupName, isCartView = false) {
 
     // Description
     const descCell = document.createElement("td");
-    descCell.textContent = ""; // 你要放別的也行
+    descCell.textContent = "";
     row.appendChild(descCell);
 
     // Codes
@@ -359,29 +407,15 @@ function loadGroup(groupName, isCartView = false) {
   });
 }
 
-
-// 主函式///////////////////////
-
-// 讀取 JSON 資料
-// 只抓題目那份（前19列）→ 這個檔不大
-fetch('./merged_survey_first19.json')
-  .then(r => r.json())
-  .then(metaData => {
-    jsonData = metaData;
-
-    // 建立 sample 名稱
-    sampleNames = jsonData.map(r => r.YEAR).filter(Boolean);
-
-    // 建立題組
-    buildGroupsFromJson(jsonData);
-  })
-  .catch(err => console.error('讀取錯誤:', err));
-
-
+// ========== Extract ==========
+function getExportHeaderForQuestion(qid) {
+  const q = findQuestionById(qid);
+  if (!q) return qid;
+  return `${qid}_${q.name}`;
+}
 
 function escapeCsv(val) {
-  const str = val.toString();
-  // 如果有逗號或雙引號，就用雙引號包起來
+  const str = (val ?? "").toString();
   if (str.includes(",") || str.includes('"') || str.includes("\n")) {
     return '"' + str.replace(/"/g, '""') + '"';
   }
@@ -398,73 +432,57 @@ document.getElementById("extract-btn").addEventListener("click", () => {
     return;
   }
 
-  // 我們要輸出的表頭：YEAR + (勾的題目) + ID
   const headers = [
     "YEAR",
     ...selectedVariables.map(qid => getExportHeaderForQuestion(qid)),
     "ID"
   ];
 
-  // 先做一個陣列裝結果
   const rows = [];
   rows.push(headers.join(","));
 
-  // 去抓原始 CSV（大的那個）
   fetch('./merged_survey.csv')
     .then(resp => resp.text())
     .then(csvText => {
       const lines = csvText.split(/\r?\n/);
-
       if (lines.length === 0) {
         alert("CSV 內容是空的");
         return;
       }
 
-      // 第 1 行是欄位名
-      const headerLine = lines[0];
-      const headerCols = headerLine.split(',');
-
-      // 找出我們需要的欄位 index：YEAR、ID、以及勾的題號
+      const headerCols = lines[0].split(',');
       const yearIdx = headerCols.indexOf("YEAR");
       const idIdx = headerCols.indexOf("ID");
 
-      // 題號 → index 的對照
       const questionIdxMap = {};
       selectedVariables.forEach(qid => {
         const idx = headerCols.indexOf(qid);
-        if (idx !== -1) {
-          questionIdxMap[qid] = idx;
-        }
+        if (idx !== -1) questionIdxMap[qid] = idx;
       });
 
-      // 從第 20 行開始才是受訪者（你說的第 20 列以後），但是這裡我們乾脆從第 2 行開始掃，遇到不是我們要的 sample 就跳過
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i];
-        if (!line.trim()) continue; // 空行跳過
+        if (!line.trim()) continue;
         const cols = line.split(',');
 
         const rowYear = cols[yearIdx];
-        if (!selectedSamples.includes(rowYear)) {
-          continue; // 不是勾的 sample 就略過
-        }
+        if (!selectedSamples.includes(rowYear)) continue;
 
         const outRow = [];
-        // YEAR
         outRow.push(escapeCsv(rowYear));
-        // 每個勾的題目
+
         selectedVariables.forEach(qid => {
           const idx = questionIdxMap[qid];
           const val = idx !== undefined ? (cols[idx] || "") : "";
           outRow.push(escapeCsv(val));
         });
-        // ID
+
         const idVal = idIdx !== -1 ? (cols[idIdx] || "") : "";
         outRow.push(escapeCsv(idVal));
 
         rows.push(outRow.join(","));
       }
 
-      // 全部組完，下載
       const csvContent = rows.join("\n");
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
@@ -481,3 +499,66 @@ document.getElementById("extract-btn").addEventListener("click", () => {
       alert("讀取資料時發生錯誤");
     });
 });
+
+// ========== ✅ 主程式：先載入 question_topics.csv 再載入 merged_survey_first19.json ==========
+Promise.all([
+  fetch('./question_topics.csv').then(r => r.text()),
+  fetch('./merged_survey_first19.json').then(r => r.json())
+])
+.then(([csvText, metaData]) => {
+  // 1) topicMap
+  const csvRows = parseCSV(csvText);
+  topicMap = buildTopicMapFromCsvRows(csvRows);
+
+  // 2) jsonData + sampleNames
+  jsonData = metaData;
+  sampleNames = jsonData.map(r => r.YEAR).filter(Boolean);
+
+  // 3) 建立題組
+  buildGroupsFromJson(jsonData);
+
+  // 4) 初始化 counts
+  document.getElementById("variable-count").textContent = selectedVariables.length;
+  document.getElementById("sample-count").textContent = selectedSamples.length;
+
+  // 5) ✅ 綁定搜尋框事件
+  const searchInput = document.getElementById("search-input");
+  const searchClear = document.getElementById("search-clear");
+
+  searchInput.addEventListener("input", () => {
+    searchQuery = searchInput.value || "";
+
+    // cart-view: 重新 render cart
+    if (document.getElementById('cart-view').style.display !== 'none') {
+      loadGroup("Selected Questions", true);
+      return;
+    }
+
+    // sample-view 不搜尋（需要我也可以幫你加）
+    if (document.getElementById('sample-view').style.display !== 'none') return;
+
+    // main-view: 若 currentGroupName=="" 就會搜全分類
+    loadGroup(currentGroupName, false);
+  });
+
+  searchClear.addEventListener("click", () => {
+    searchQuery = "";
+    searchInput.value = "";
+
+    if (document.getElementById('cart-view').style.display !== 'none') {
+      loadGroup("Selected Questions", true);
+      return;
+    }
+    if (document.getElementById('sample-view').style.display !== 'none') return;
+
+    loadGroup(currentGroupName, false);
+  });
+
+  // 6) ✅ 初始畫面：不塞滿全表，只顯示提示（輸入搜尋才會顯示結果）
+  currentGroupName = "";
+  loadGroup(currentGroupName, false);
+
+  // sample title 固定
+  setSampleTitle("Select Sample Years");
+})
+.catch(err => console.error('讀取錯誤:', err));
