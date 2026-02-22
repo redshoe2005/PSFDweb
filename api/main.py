@@ -1,15 +1,18 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import os
 import csv
+import tempfile
+
 import boto3
 from botocore.config import Config
 
+
 app = FastAPI()
 
-# 先用 *，你穩定後再改成只允許你的 GitHub Pages 網域
+# ✅ 先用 * 方便測試；穩定後可改成只允許 GitHub Pages 網域
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,28 +20,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ====== R2 / CSV 設定（用環境變數） ======
+# ====== R2 / CSV 設定（用 Render 環境變數） ======
 R2_ENDPOINT = os.environ.get("R2_ENDPOINT")  # e.g. https://<account_id>.r2.cloudflarestorage.com
 R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID")
 R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY")
 R2_BUCKET = os.environ.get("R2_BUCKET")
-R2_OBJECT_KEY = os.environ.get("R2_OBJECT_KEY", "merged_survey.csv")  # 你在 R2 裡的檔名/key
+R2_OBJECT_KEY = os.environ.get("R2_OBJECT_KEY", "merged_survey.csv")  # 你在 R2 的 object key
 
 LOCAL_CSV_PATH = os.environ.get("LOCAL_CSV_PATH", "/tmp/merged_survey.csv")
 
+# 你的 merged_survey.csv 結構：第2~18列是題目列（共17列），第19列後才是答案列
+QUESTION_ROWS_COUNT = int(os.environ.get("QUESTION_ROWS_COUNT", "17"))
+
 
 class ExtractRequest(BaseModel):
-    samples: list[str]            # selectedSamples
-    variables: list[str]          # selectedVariables (qid)
-    exportHeaders: list[str]      # 你前端用 getExportHeaderForQuestion() 算出的欄名（對應 variables 順序）
+    samples: list[str]        # 例如 ["CII2002","RR2002", ...]
+    variables: list[str]      # 題號欄位，例如 ["91","92"]
+    exportHeaders: list[str]  # 對應 variables 的輸出欄名，例如 ["91_d17a1","92_d19"]
 
 
 def ensure_csv_local():
-    """啟動時/需要時，確保大 CSV 在本機（Render 的 /tmp 是可用的）"""
+    """確保大 CSV 已下載到本機（Render 的 /tmp 可用）"""
     if os.path.exists(LOCAL_CSV_PATH) and os.path.getsize(LOCAL_CSV_PATH) > 0:
         return
 
-    # 檢查必要環境變數
     missing = [k for k, v in {
         "R2_ENDPOINT": R2_ENDPOINT,
         "R2_ACCESS_KEY_ID": R2_ACCESS_KEY_ID,
@@ -70,7 +75,13 @@ def startup():
 @app.get("/health")
 def health():
     ok = os.path.exists(LOCAL_CSV_PATH) and os.path.getsize(LOCAL_CSV_PATH) > 0
-    return {"ok": True, "csv_ready": ok, "path": LOCAL_CSV_PATH, "object_key": R2_OBJECT_KEY}
+    return {
+        "ok": True,
+        "csv_ready": ok,
+        "path": LOCAL_CSV_PATH,
+        "object_key": R2_OBJECT_KEY,
+        "question_rows_count": QUESTION_ROWS_COUNT
+    }
 
 
 @app.post("/extract")
@@ -84,67 +95,70 @@ def extract(req: ExtractRequest):
 
     ensure_csv_local()
 
-    samples_set = set(req.samples)
+    # ✅ sample code 精準比對（同一年可能有兩個 sample，所以不要用 4 位數年份）
+    allowed_samples = set((s or "").strip() for s in req.samples)
+
     variables = req.variables
     export_headers = req.exportHeaders
 
-    def generate():
-        # 逐行讀、逐行輸出（不吃爆記憶體）
-        with open(LOCAL_CSV_PATH, "r", encoding="utf-8", newline="") as f:
-            reader = csv.reader(f)
-            header = next(reader, None)
-            if not header:
-                return
+    # 先讀 header 計算 index（避免中途才出錯）
+    with open(LOCAL_CSV_PATH, "r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        if not header:
+            raise HTTPException(status_code=500, detail="CSV is empty")
 
-            # 找 YEAR/ID 欄位
-            try:
-                year_idx = header.index("YEAR")
-            except ValueError:
-                raise HTTPException(status_code=500, detail="YEAR column not found in CSV")
+        if "YEAR" not in header:
+            raise HTTPException(status_code=500, detail="YEAR column not found")
 
-            try:
-                id_idx = header.index("ID")
-            except ValueError:
-                raise HTTPException(status_code=500, detail="ID column not found in CSV")
+        year_idx = header.index("YEAR")
+        id_idx = header.index("ID") if "ID" in header else None
 
-            # 題號欄位 idx
-            idx_map = {}
+        idx_map = {qid: (header.index(qid) if qid in header else None) for qid in variables}
+
+    # ✅ 先寫到暫存檔再回傳（避免 Streaming 空檔）
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="w", encoding="utf-8", newline="")
+    out_path = tmp.name
+    writer = csv.writer(tmp)
+
+    out_header = ["YEAR", *export_headers]
+    if id_idx is not None:
+        out_header.append("ID")
+    writer.writerow(out_header)
+
+    with open(LOCAL_CSV_PATH, "r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        next(reader, None)  # skip header row
+
+        # ✅ 跳過題目列（第2~18列，共 17 列）
+        for _ in range(QUESTION_ROWS_COUNT):
+            next(reader, None)
+
+        # ✅ 從答案列開始
+        for row in reader:
+            if not row:
+                continue
+            if year_idx >= len(row):
+                continue
+
+            sample = (row[year_idx] or "").strip()
+            if sample not in allowed_samples:
+                continue
+
+            out = [sample]
             for qid in variables:
-                if qid in header:
-                    idx_map[qid] = header.index(qid)
-                else:
-                    # 如果沒找到就讓它輸出空白（跟你前端舊邏輯一致）
-                    idx_map[qid] = None
+                idx = idx_map.get(qid)
+                out.append(row[idx] if (idx is not None and idx < len(row)) else "")
 
-            # 輸出表頭：YEAR + exportHeaders + ID
-            out_header = ["YEAR", *export_headers, "ID"]
-            yield (",".join(_escape_csv(x) for x in out_header) + "\n").encode("utf-8")
-
-            for row in reader:
-                if len(row) <= max(year_idx, id_idx):
-                    continue
-
-                row_year = row[year_idx]
-                if row_year not in samples_set:
-                    continue
-
-                out = [row_year]
-                for qid in variables:
-                    idx = idx_map.get(qid)
-                    val = row[idx] if (idx is not None and idx < len(row)) else ""
-                    out.append(val)
+            if id_idx is not None:
                 out.append(row[id_idx] if id_idx < len(row) else "")
 
-                yield (",".join(_escape_csv(x) for x in out) + "\n").encode("utf-8")
+            writer.writerow(out)
 
-    headers = {
-        "Content-Disposition": 'attachment; filename="data_extract.csv"'
-    }
-    return StreamingResponse(generate(), media_type="text/csv; charset=utf-8", headers=headers)
+    tmp.close()
 
-
-def _escape_csv(val) -> str:
-    s = "" if val is None else str(val)
-    if any(c in s for c in [",", '"', "\n", "\r"]):
-        s = '"' + s.replace('"', '""') + '"'
-    return s
+    return FileResponse(
+        out_path,
+        media_type="text/csv; charset=utf-8",
+        filename="data_extract.csv",
+    )
