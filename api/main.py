@@ -38,6 +38,8 @@ class ExtractRequest(BaseModel):
     variables: list[str]      # 題號欄位，例如 ["91","92"]
     exportHeaders: list[str]  # 對應 variables 的輸出欄名，例如 ["91_d17a1","92_d19"]
 
+def normalize_header(h: str) -> str:
+    return (h or "").strip().lstrip("\ufeff")
 
 def ensure_csv_local():
     """確保大 CSV 已下載到本機（Render 的 /tmp 可用）"""
@@ -82,6 +84,14 @@ def health():
         "object_key": R2_OBJECT_KEY,
         "question_rows_count": QUESTION_ROWS_COUNT
     }
+@app.get("/debug_header")
+def debug_header():
+    ensure_csv_local()
+    with open(LOCAL_CSV_PATH, "r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        header_raw = next(reader, None)
+    header = [normalize_header(h) for h in (header_raw or [])]
+    return {"header_raw_first5": (header_raw or [])[:5], "header_norm_first5": header[:5]}
 
 
 @app.post("/extract")
