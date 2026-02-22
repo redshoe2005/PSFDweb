@@ -30,7 +30,7 @@ R2_OBJECT_KEY = os.environ.get("R2_OBJECT_KEY", "merged_survey.csv")  # 你在 R
 LOCAL_CSV_PATH = os.environ.get("LOCAL_CSV_PATH", "/tmp/merged_survey.csv")
 
 # 你的 merged_survey.csv 結構：第2~18列是題目列（共17列），第19列後才是答案列
-QUESTION_ROWS_COUNT = int(os.environ.get("QUESTION_ROWS_COUNT", "17"))
+QUESTION_ROWS_COUNT = int(os.environ.get("QUESTION_ROWS_COUNT", "18"))
 
 
 class ExtractRequest(BaseModel):
