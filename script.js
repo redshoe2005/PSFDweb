@@ -8,6 +8,9 @@ let sampleNames = [];              // 例如 ["CII2002", "CIII2004", ...]
 let topicMap = {};                 // qid -> topic
 let searchQuery = "";              // ✅ 搜尋字串（新增）
 
+// ✅ Render 後端 API（Extract 用）
+const API_ORIGIN = "https://psfdweb.onrender.com";
+
 // 題組清單（左側 sidebar）
 const variableGroups = [
   { id: "A 基本資料", label: "A 基本資料" },
@@ -414,6 +417,7 @@ function getExportHeaderForQuestion(qid) {
   return `${qid}_${q.name}`;
 }
 
+// 保留（目前後端會幫你 escape；這裡留著不影響）
 function escapeCsv(val) {
   const str = (val ?? "").toString();
   if (str.includes(",") || str.includes('"') || str.includes("\n")) {
@@ -422,7 +426,8 @@ function escapeCsv(val) {
   return str;
 }
 
-document.getElementById("extract-btn").addEventListener("click", () => {
+// ✅ 改成呼叫 Render 後端 /extract（不再下載 merged_survey.csv）
+document.getElementById("extract-btn").addEventListener("click", async () => {
   if (selectedVariables.length === 0) {
     alert("請先勾選至少一個題目！");
     return;
@@ -432,72 +437,46 @@ document.getElementById("extract-btn").addEventListener("click", () => {
     return;
   }
 
-  const headers = [
-    "YEAR",
-    ...selectedVariables.map(qid => getExportHeaderForQuestion(qid)),
-    "ID"
-  ];
+  const exportHeaders = selectedVariables.map(qid => getExportHeaderForQuestion(qid));
+  const payload = {
+    samples: selectedSamples,
+    variables: selectedVariables,
+    exportHeaders
+  };
 
-  const rows = [];
-  rows.push(headers.join(","));
+  const btn = document.getElementById("extract-btn");
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Preparing...";
 
-  fetch('./merged_survey.csv')
-    .then(resp => resp.text())
-    .then(csvText => {
-      const lines = csvText.split(/\r?\n/);
-      if (lines.length === 0) {
-        alert("CSV 內容是空的");
-        return;
-      }
-
-      const headerCols = lines[0].split(',');
-      const yearIdx = headerCols.indexOf("YEAR");
-      const idIdx = headerCols.indexOf("ID");
-
-      const questionIdxMap = {};
-      selectedVariables.forEach(qid => {
-        const idx = headerCols.indexOf(qid);
-        if (idx !== -1) questionIdxMap[qid] = idx;
-      });
-
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i];
-        if (!line.trim()) continue;
-        const cols = line.split(',');
-
-        const rowYear = cols[yearIdx];
-        if (!selectedSamples.includes(rowYear)) continue;
-
-        const outRow = [];
-        outRow.push(escapeCsv(rowYear));
-
-        selectedVariables.forEach(qid => {
-          const idx = questionIdxMap[qid];
-          const val = idx !== undefined ? (cols[idx] || "") : "";
-          outRow.push(escapeCsv(val));
-        });
-
-        const idVal = idIdx !== -1 ? (cols[idIdx] || "") : "";
-        outRow.push(escapeCsv(idVal));
-
-        rows.push(outRow.join(","));
-      }
-
-      const csvContent = rows.join("\n");
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "data_extract.csv";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    })
-    .catch(err => {
-      console.error(err);
-      alert("讀取資料時發生錯誤");
+  try {
+    const resp = await fetch(`${API_ORIGIN}/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
     });
+
+    if (!resp.ok) {
+      const msg = await resp.text().catch(() => "");
+      throw new Error(`API error ${resp.status} ${msg}`);
+    }
+
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "data_extract.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error(err);
+    alert("後端抽取失敗：請確認 https://psfdweb.onrender.com/health 是否正常，以及前端是否被 CORS 擋下。");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
 });
 
 // ========== ✅ 主程式：先載入 question_topics.csv 再載入 merged_survey_first19.json ==========
@@ -534,7 +513,7 @@ Promise.all([
       return;
     }
 
-    // sample-view 不搜尋（需要我也可以幫你加）
+    // sample-view 不搜尋
     if (document.getElementById('sample-view').style.display !== 'none') return;
 
     // main-view: 若 currentGroupName=="" 就會搜全分類
