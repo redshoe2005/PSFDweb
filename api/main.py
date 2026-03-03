@@ -93,7 +93,49 @@ def debug_header():
     header = [normalize_header(h) for h in (header_raw or [])]
     return {"header_raw_first5": (header_raw or [])[:5], "header_norm_first5": header[:5]}
 
+@app.post("/debug_extract")
+def debug_extract(req: ExtractRequest):
+    ensure_csv_local()
 
+    # 你目前用的 sample 清單
+    allowed_samples = set((s or "").strip().lstrip("\ufeff") for s in req.samples)
+
+    # 讀 header
+    with open(LOCAL_CSV_PATH, "r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        if not header:
+            return {"error": "empty csv"}
+
+        header = [(h or "").strip().lstrip("\ufeff") for h in header]
+        year_idx = header.index("YEAR")
+
+        # skip header
+        # skip question rows
+        for _ in range(QUESTION_ROWS_COUNT):
+            next(reader, None)
+
+        # 抓答案區前 10 列 sample
+        first_samples = []
+        match_count = 0
+        checked = 0
+        for row in reader:
+            if not row or year_idx >= len(row):
+                continue
+            s = (row[year_idx] or "").strip().lstrip("\ufeff")
+            first_samples.append(s)
+            checked += 1
+            if s in allowed_samples:
+                match_count += 1
+            if checked >= 10:
+                break
+
+    return {
+        "question_rows_count": QUESTION_ROWS_COUNT,
+        "allowed_samples_first10": list(req.samples)[:10],
+        "answer_first10_samples": first_samples,
+        "matches_in_first10": match_count
+    }
 @app.post("/extract")
 def extract(req: ExtractRequest):
     if len(req.samples) == 0:
