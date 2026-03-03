@@ -136,39 +136,57 @@ def debug_extract(req: ExtractRequest):
         "answer_first10_samples": first_samples,
         "matches_in_first10": match_count
     }
+
+
 @app.post("/extract")
 def extract(req: ExtractRequest):
-    if len(req.samples) == 0:
+    if not req.samples:
         raise HTTPException(status_code=400, detail="samples is empty")
-    if len(req.variables) == 0:
+    if not req.variables:
         raise HTTPException(status_code=400, detail="variables is empty")
     if len(req.exportHeaders) != len(req.variables):
         raise HTTPException(status_code=400, detail="exportHeaders must match variables length")
 
     ensure_csv_local()
 
-    # ✅ sample code 精準比對（同一年可能有兩個 sample，所以不要用 4 位數年份）
-    allowed_samples = set((s or "").strip() for s in req.samples)
+    def norm(s: str) -> str:
+        return (s or "").strip().lstrip("\ufeff")
 
-    variables = req.variables
+    # ✅ sample code 精準比對（同一年多 sample）
+    allowed_samples = set(norm(s) for s in req.samples)
+
+    # ✅ variables 也做 normalize，避免前端送來有空白
+    variables = [norm(v) for v in req.variables]
     export_headers = req.exportHeaders
 
-    # 先讀 header 計算 index（避免中途才出錯）
+    # 先讀 header 計算 index
     with open(LOCAL_CSV_PATH, "r", encoding="utf-8", newline="") as f:
         reader = csv.reader(f)
-        header = next(reader, None)
-        if not header:
+        header_raw = next(reader, None)
+        if not header_raw:
             raise HTTPException(status_code=500, detail="CSV is empty")
 
-        if "YEAR" not in header:
-            raise HTTPException(status_code=500, detail="YEAR column not found")
+        header = [norm(h) for h in header_raw]
 
+        if "YEAR" not in header:
+            raise HTTPException(status_code=500, detail=f"YEAR column not found. First 5={header[:5]}")
         year_idx = header.index("YEAR")
+
         id_idx = header.index("ID") if "ID" in header else None
 
         idx_map = {qid: (header.index(qid) if qid in header else None) for qid in variables}
 
-    # ✅ 先寫到暫存檔再回傳（避免 Streaming 空檔）
+        # ✅ 判斷題目列 vs 答案列的欄位：
+        # 優先用欄位 "1"，沒有就用 variables 第一個
+        if "1" in header:
+            sentinel_idx = header.index("1")
+        else:
+            first_q = variables[0]
+            if first_q not in header:
+                raise HTTPException(status_code=500, detail="Cannot determine sentinel column")
+            sentinel_idx = header.index(first_q)
+
+    # ✅ 先寫到暫存檔，避免 streaming 空檔
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="w", encoding="utf-8", newline="")
     out_path = tmp.name
     writer = csv.writer(tmp)
@@ -178,22 +196,28 @@ def extract(req: ExtractRequest):
         out_header.append("ID")
     writer.writerow(out_header)
 
+    answers_started = False
+    written = 0
+
     with open(LOCAL_CSV_PATH, "r", encoding="utf-8", newline="") as f:
         reader = csv.reader(f)
-        next(reader, None)  # skip header row
+        next(reader, None)  # skip header
 
-        # ✅ 跳過題目列（第2~18列，共 17 列）
-        for _ in range(QUESTION_ROWS_COUNT):
-            next(reader, None)
-
-        # ✅ 從答案列開始
         for row in reader:
-            if not row:
-                continue
-            if year_idx >= len(row):
+            if not row or year_idx >= len(row):
                 continue
 
-            sample = (row[year_idx] or "").strip()
+            sentinel_val = row[sentinel_idx] if sentinel_idx < len(row) else ""
+
+            # ✅ 題目列特徵：欄位內容含「｜」(例如 a03z1｜請問...)
+            # 只要還在題目列，就 continue
+            if not answers_started:
+                if "｜" in (sentinel_val or ""):
+                    continue
+                # 第一次遇到不含｜的列 → 視為答案列開始
+                answers_started = True
+
+            sample = norm(row[year_idx])
             if sample not in allowed_samples:
                 continue
 
@@ -206,11 +230,17 @@ def extract(req: ExtractRequest):
                 out.append(row[id_idx] if id_idx < len(row) else "")
 
             writer.writerow(out)
+            written += 1
 
     tmp.close()
+
+    # （可選）如果你希望完全沒資料就直接回 404，可取消註解：
+    # if written == 0:
+    #     raise HTTPException(status_code=404, detail="No rows matched your selected samples")
 
     return FileResponse(
         out_path,
         media_type="text/csv; charset=utf-8",
         filename="data_extract.csv",
+        headers={"X-Written-Rows": str(written)}  # ✅ 方便你在 Network 看實際輸出列數
     )
